@@ -253,8 +253,6 @@
 
     const OVERLAY_ID = '__autoAcceptBgOverlay';
     const STYLE_ID = '__autoAcceptBgStyles';
-    const clickedTimestamps = new WeakMap();
-    const CLICK_COOLDOWN_MS = 5000;
     const STYLES = `
         #__autoAcceptBgOverlay { position: fixed; background: rgba(0, 0, 0, 0.98); z-index: 2147483647; font-family: sans-serif; color: #fff; display: flex; flex-direction: column; justify-content: center; align-items: center; pointer-events: none; opacity: 0; transition: opacity 0.3s; }
         #__autoAcceptBgOverlay.visible { opacity: 1; }
@@ -553,8 +551,8 @@
         if (text.length === 0 || text.length > 50) {
             return false;
         }
-        const patterns = ['accept', 'run', 'retry', 'apply', 'execute', 'confirm', 'allow once', 'allow', 'ok', 'yes', 'continue', 'proceed', 'approve', 'submit', 'save', 'done'];
-        const rejects = ['skip', 'reject', 'cancel', 'close', 'refine', 'dismiss', 'no', 'decline', 'deny', 'back', 'undo', 'revert'];
+        const patterns = ['accept', 'run', 'retry', 'apply', 'execute', 'confirm', 'allow once', 'allow'];
+        const rejects = ['skip', 'reject', 'cancel', 'close', 'refine', 'model', 'gemini', 'claude', 'gpt', 'fast', 'slow', 'select'];
         if (rejects.some(r => text.includes(r))) {
             log(`[Button] Rejected (matches reject pattern): "${text.substring(0, 30)}"`);
             return false;
@@ -619,18 +617,11 @@
         let clicked = 0;
         let verified = 0;
         const uniqueFound = [...new Set(found)];
-        const now = Date.now();
 
         for (const el of uniqueFound) {
-            const lastClickTime = clickedTimestamps.get(el);
-            if (lastClickTime && (now - lastClickTime) < CLICK_COOLDOWN_MS) {
-                continue;
-            }
             if (isAcceptButton(el)) {
                 const buttonText = (el.textContent || "").trim();
                 log(`Clicking: "${buttonText}"`);
-
-                clickedTimestamps.set(el, now);
 
                 try {
                     el.click();
@@ -646,10 +637,6 @@
                     Analytics.trackClick(buttonText, log);
                     verified++;
                     log(`[Stats] Click verified (button disappeared)`);
-                } else {
-                    Analytics.trackClick(buttonText, log);
-                    verified++;
-                    log(`[Stats] Click tracked (button still visible - dropdown mode)`);
                 }
             }
         }
@@ -668,29 +655,7 @@
             cycle++;
             log(`[Loop] Cycle ${cycle}: Starting...`);
 
-            const clicked = await performClick([
-                'button',
-                '[class*="button"]',
-                '[class*="Button"]',
-                '[class*="anysphere"]',
-                '[role="button"]',
-                '[data-testid*="accept"]',
-                '[data-testid*="button"]',
-                'div[tabindex="0"]',
-                'span[tabindex="0"]',
-                '[class*="action"]',
-                '[class*="Action"]',
-                '[class*="primary"]',
-                '[class*="Primary"]',
-                '[class*="confirm"]',
-                '[class*="Confirm"]',
-                '[class*="accept"]',
-                '[class*="Accept"]',
-                '[class*="apply"]',
-                '[class*="Apply"]',
-                '[class*="run"]',
-                '[class*="Run"]'
-            ]);
+            const clicked = await performClick(['button', '[class*="button"]', '[class*="anysphere"]']);
             log(`[Loop] Cycle ${cycle}: Clicked ${clicked} buttons`);
 
             await new Promise(r => setTimeout(r, 800));
@@ -755,29 +720,7 @@
 
             let clicked = 0;
             if (!hasBadge) {
-                clicked = await performClick([
-                    '.bg-ide-button-background',
-                    'button',
-                    '[class*="button"]',
-                    '[class*="Button"]',
-                    '[role="button"]',
-                    '[data-testid*="accept"]',
-                    '[data-testid*="button"]',
-                    'div[tabindex="0"]',
-                    'span[tabindex="0"]',
-                    '[class*="action"]',
-                    '[class*="Action"]',
-                    '[class*="primary"]',
-                    '[class*="Primary"]',
-                    '[class*="confirm"]',
-                    '[class*="Confirm"]',
-                    '[class*="accept"]',
-                    '[class*="Accept"]',
-                    '[class*="apply"]',
-                    '[class*="Apply"]',
-                    '[class*="run"]',
-                    '[class*="Run"]'
-                ]);
+                clicked = await performClick(['.bg-ide-button-background', 'button', '[class*="button"]']);
                 log(`[Loop] Cycle ${cycle}: Clicked ${clicked} accept buttons`);
             } else {
                 log(`[Loop] Cycle ${cycle}: Skipping clicks - conversation is DONE (has badge)`);
@@ -915,29 +858,7 @@
                 log(`Starting static poll loop...`);
                 (async function staticLoop() {
                     while (state.isRunning && state.sessionID === sid) {
-                        performClick([
-                            'button',
-                            '[class*="button"]',
-                            '[class*="Button"]',
-                            '[class*="anysphere"]',
-                            '[role="button"]',
-                            '[data-testid*="accept"]',
-                            '[data-testid*="button"]',
-                            'div[tabindex="0"]',
-                            'span[tabindex="0"]',
-                            '[class*="action"]',
-                            '[class*="Action"]',
-                            '[class*="primary"]',
-                            '[class*="Primary"]',
-                            '[class*="confirm"]',
-                            '[class*="Confirm"]',
-                            '[class*="accept"]',
-                            '[class*="Accept"]',
-                            '[class*="apply"]',
-                            '[class*="Apply"]',
-                            '[class*="run"]',
-                            '[class*="Run"]'
-                        ]);
+                        performClick(['button', '[class*="button"]', '[class*="anysphere"]']);
                         await new Promise(r => setTimeout(r, config.pollInterval || 1000));
                     }
                 })();
