@@ -13,7 +13,6 @@ pnpm-lock.yaml
 out/
 dist/
 build/
-*.vsix
 
 # VS Code specific
 .vscode-test/
