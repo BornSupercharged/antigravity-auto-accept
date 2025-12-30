@@ -688,6 +688,13 @@
                 log(`[Loop] Cycle ${cycle}: Clicking tab "${tabLabel}"`);
                 targetTab.dispatchEvent(new MouseEvent('click', { view: window, bubbles: true, cancelable: true }));
                 index++;
+
+                // After switching tabs, wait briefly then click any buttons on the new tab
+                await new Promise(r => setTimeout(r, 500));
+                const clickedAfterSwitch = await performClick(['button', '[class*="button"]', '[class*="anysphere"]']);
+                if (clickedAfterSwitch > 0) {
+                    log(`[Loop] Cycle ${cycle}: Clicked ${clickedAfterSwitch} buttons after tab switch`);
+                }
             }
 
             const state = window.__autoAcceptState;
@@ -709,22 +716,11 @@
             cycle++;
             log(`[Loop] Cycle ${cycle}: Starting...`);
 
-            const allSpans = queryAll('span');
-            const feedbackBadges = allSpans.filter(s => {
-                const t = s.textContent.trim();
-                return t === 'Good' || t === 'Bad';
-            });
-            const hasBadge = feedbackBadges.length > 0;
-
-            log(`[Loop] Cycle ${cycle}: Found ${feedbackBadges.length} Good/Bad badges`);
-
+            // Always try to click accept buttons - don't skip based on badge detection
+            // Badge detection was too broad and would match "Good"/"Bad" text anywhere on the page
             let clicked = 0;
-            if (!hasBadge) {
-                clicked = await performClick(['.bg-ide-button-background', 'button', '[class*="button"]']);
-                log(`[Loop] Cycle ${cycle}: Clicked ${clicked} accept buttons`);
-            } else {
-                log(`[Loop] Cycle ${cycle}: Skipping clicks - conversation is DONE (has badge)`);
-            }
+            clicked = await performClick(['.bg-ide-button-background', 'button', '[class*="button"]']);
+            log(`[Loop] Cycle ${cycle}: Clicked ${clicked} accept buttons`);
 
             await new Promise(r => setTimeout(r, 800));
 
@@ -746,9 +742,16 @@
                 log(`[Loop] Cycle ${cycle}: Clicking tab "${clickedTabName}"`);
                 targetTab.dispatchEvent(new MouseEvent('click', { view: window, bubbles: true, cancelable: true }));
                 index++;
+
+                // After switching tabs, wait briefly then click any buttons on the new tab
+                await new Promise(r => setTimeout(r, 500));
+                const clickedAfterSwitch = await performClick(['.bg-ide-button-background', 'button', '[class*="button"]']);
+                if (clickedAfterSwitch > 0) {
+                    log(`[Loop] Cycle ${cycle}: Clicked ${clickedAfterSwitch} buttons after tab switch`);
+                }
             }
 
-            await new Promise(r => setTimeout(r, 1500));
+            await new Promise(r => setTimeout(r, 1000));
 
             const allSpansAfter = queryAll('span');
             const feedbackTexts = allSpansAfter
@@ -847,21 +850,21 @@
 
             log(`Agent Loaded (IDE: ${ide}, BG: ${isBG})`, true);
 
+            // Always run the static poll loop - this reliably clicks buttons
+            hideOverlay();
+            log(`Starting static poll loop...`);
+            (async function staticLoop() {
+                while (state.isRunning && state.sessionID === sid) {
+                    performClick(['button', '[class*="button"]', '[class*="anysphere"]']);
+                    await new Promise(r => setTimeout(r, config.pollInterval || 1000));
+                }
+            })();
+
+            // If background mode, also run the tab-switching loop concurrently
             if (isBG) {
-                log(`[BG] Creating overlay and starting loop...`);
-                showOverlay();
-                log(`[BG] Overlay created, starting ${ide} loop...`);
+                log(`[BG] Also starting background tab-switching loop...`);
                 if (ide === 'cursor') cursorLoop(sid);
                 else antigravityLoop(sid);
-            } else {
-                hideOverlay();
-                log(`Starting static poll loop...`);
-                (async function staticLoop() {
-                    while (state.isRunning && state.sessionID === sid) {
-                        performClick(['button', '[class*="button"]', '[class*="anysphere"]']);
-                        await new Promise(r => setTimeout(r, config.pollInterval || 1000));
-                    }
-                })();
             }
         } catch (e) {
             log(`ERROR in __autoAcceptStart: ${e.message}`);
