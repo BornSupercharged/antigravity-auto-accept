@@ -1,0 +1,60 @@
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Build outputs
+out/
+dist/
+build/
+*.vsix
+
+# VS Code specific
+.vscode-test/
+*.code-workspace
+
+# Test coverage and reports
+coverage/
+.nyc_output/
+test-results/
+*.log
+TEST_REPORT.md
+VERIFICATION_REPORT.md
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# IDE/Editor files
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+*.tmp
+
+# Debug files
+debug.log
+*.debug
+
+# Agent data
+.agent/

@@ -1,0 +1,42 @@
+# Exclude development files
+.env
+.git/**
+.gitignore
+.agent/**
+
+# Exclude output files and logs
+*.txt
+*.log
+
+# Exclude test files
+test/**
+test_scripts/**
+*.test.js
+
+# Exclude backup and temp files
+temp_extract/**
+temp.zip
+compare_*/
+TEST_REPORT.md
+VERIFICATION_REPORT.md
+
+# Exclude all node_modules EXCEPT ws (required for Cursor CDP)
+node_modules/**
+!node_modules/ws/**
+
+# Exclude source maps
+*.map
+
+# Exclude TypeScript source (we use bundled JS)
+*.ts
+tsconfig.json
+
+# Exclude package lock
+package-lock.json
+
+# Exclude build configs
+esbuild.config.js
+.eslintrc.json
+
+# Exclude VSIX files
+*.vsix

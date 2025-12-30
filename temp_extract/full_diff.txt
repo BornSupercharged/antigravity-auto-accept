@@ -1,0 +1,554 @@
+6,13c6,26
+<     const Analytics = (function () {
+<         const TERMINAL_KEYWORDS = ['run', 'execute', 'command', 'terminal'];
+<         const SECONDS_PER_CLICK = 5;
+<         const TIME_VARIANCE = 0.2;
+< 
+<         const ActionType = {
+<             FILE_EDIT: 'file_edit',
+<             TERMINAL_COMMAND: 'terminal_command'
+---
+>     const SECONDS_PER_CLICK = 5;
+>     const TIME_VARIANCE = 0.2;
+>     const TERMINAL_KEYWORDS = ['run', 'execute', 'command', 'terminal'];
+>     const BUTTON_DISAPPEAR_TIMEOUT = 500;
+>     const LOOP_CYCLE_DELAY = 3000;
+>     const CLICK_SETTLE_DELAY = 800;
+> 
+>     const ActionType = {
+>         FILE_EDIT: 'file_edit',
+>         TERMINAL_COMMAND: 'terminal_command'
+>     };
+> 
+>     function createDefaultStats() {
+>         return {
+>             clicksThisSession: 0,
+>             blockedThisSession: 0,
+>             sessionStartTime: null,
+>             fileEditsThisSession: 0,
+>             terminalCommandsThisSession: 0,
+>             actionsWhileAway: 0,
+>             isWindowFocused: true
+14a28
+>     }
+16,26c30,40
+<         function createDefaultStats() {
+<             return {
+<                 clicksThisSession: 0,
+<                 blockedThisSession: 0,
+<                 sessionStartTime: null,
+<                 fileEditsThisSession: 0,
+<                 terminalCommandsThisSession: 0,
+<                 actionsWhileAway: 0,
+<                 isWindowFocused: true,
+<                 lastConversationUrl: null,
+<                 lastConversationStats: null
+---
+>     function ensureState() {
+>         if (!window.__autoAcceptState) {
+>             window.__autoAcceptState = {
+>                 isRunning: false,
+>                 tabNames: [],
+>                 completionStatus: {},
+>                 sessionID: 0,
+>                 currentMode: null,
+>                 startTimes: {},
+>                 bannedCommands: [],
+>                 stats: createDefaultStats()
+27a42,49
+>         } else if (!window.__autoAcceptState.stats) {
+>             window.__autoAcceptState.stats = createDefaultStats();
+>         } else {
+>             const s = window.__autoAcceptState.stats;
+>             if (s.actionsWhileAway === undefined) s.actionsWhileAway = 0;
+>             if (s.isWindowFocused === undefined) s.isWindowFocused = true;
+>             if (s.fileEditsThisSession === undefined) s.fileEditsThisSession = 0;
+>             if (s.terminalCommandsThisSession === undefined) s.terminalCommandsThisSession = 0;
+28a51,52
+>         return window.__autoAcceptState;
+>     }
+30,32c54,57
+<         function getStats() {
+<             return window.__autoAcceptState?.stats || createDefaultStats();
+<         }
+---
+>     function getStats() {
+>         const state = ensureState();
+>         return state.stats;
+>     }
+34,35c59,62
+<         function getStatsMutable() {
+<             return window.__autoAcceptState.stats;
+---
+>     function categorizeClick(buttonText) {
+>         const text = (buttonText || '').toLowerCase();
+>         for (const keyword of TERMINAL_KEYWORDS) {
+>             if (text.includes(keyword)) return ActionType.TERMINAL_COMMAND;
+36a64,65
+>         return ActionType.FILE_EDIT;
+>     }
+38,44c67,70
+<         function categorizeClick(buttonText) {
+<             const text = (buttonText || '').toLowerCase();
+<             for (const keyword of TERMINAL_KEYWORDS) {
+<                 if (text.includes(keyword)) return ActionType.TERMINAL_COMMAND;
+<             }
+<             return ActionType.FILE_EDIT;
+<         }
+---
+>     function trackClick(buttonText) {
+>         const stats = getStats();
+>         stats.clicksThisSession++;
+>         log(`[Stats] Click tracked. Total: ${stats.clicksThisSession}`);
+46,49c72,79
+<         function trackClick(buttonText, log) {
+<             const stats = getStatsMutable();
+<             stats.clicksThisSession++;
+<             log(`[Stats] Click tracked. Total: ${stats.clicksThisSession}`);
+---
+>         const category = categorizeClick(buttonText);
+>         if (category === ActionType.TERMINAL_COMMAND) {
+>             stats.terminalCommandsThisSession++;
+>             log(`[Stats] Terminal command. Total: ${stats.terminalCommandsThisSession}`);
+>         } else {
+>             stats.fileEditsThisSession++;
+>             log(`[Stats] File edit. Total: ${stats.fileEditsThisSession}`);
+>         }
+51,58c81,84
+<             const category = categorizeClick(buttonText);
+<             if (category === ActionType.TERMINAL_COMMAND) {
+<                 stats.terminalCommandsThisSession++;
+<                 log(`[Stats] Terminal command. Total: ${stats.terminalCommandsThisSession}`);
+<             } else {
+<                 stats.fileEditsThisSession++;
+<                 log(`[Stats] File edit. Total: ${stats.fileEditsThisSession}`);
+<             }
+---
+>         if (!stats.isWindowFocused) {
+>             stats.actionsWhileAway++;
+>             log(`[Stats] Away action. Total away: ${stats.actionsWhileAway}`);
+>         }
+60,65c86,87
+<             let isAway = false;
+<             if (!stats.isWindowFocused) {
+<                 stats.actionsWhileAway++;
+<                 isAway = true;
+<                 log(`[Stats] Away action. Total away: ${stats.actionsWhileAway}`);
+<             }
+---
+>         return { category, totalClicks: stats.clicksThisSession };
+>     }
+67,68c89,93
+<             return { category, isAway, totalClicks: stats.clicksThisSession };
+<         }
+---
+>     function trackBlocked() {
+>         const stats = getStats();
+>         stats.blockedThisSession++;
+>         log(`[Stats] Blocked. Total: ${stats.blockedThisSession}`);
+>     }
+70,74c95,107
+<         function trackBlocked(log) {
+<             const stats = getStatsMutable();
+<             stats.blockedThisSession++;
+<             log(`[Stats] Blocked. Total: ${stats.blockedThisSession}`);
+<         }
+---
+>     function collectROI() {
+>         const stats = getStats();
+>         const collected = {
+>             clicks: stats.clicksThisSession || 0,
+>             blocked: stats.blockedThisSession || 0,
+>             sessionStart: stats.sessionStartTime
+>         };
+>         log(`[ROI] Collected: ${collected.clicks} clicks, ${collected.blocked} blocked`);
+>         stats.clicksThisSession = 0;
+>         stats.blockedThisSession = 0;
+>         stats.sessionStartTime = Date.now();
+>         return collected;
+>     }
+76,88c109,111
+<         function collectROI(log) {
+<             const stats = getStatsMutable();
+<             const collected = {
+<                 clicks: stats.clicksThisSession || 0,
+<                 blocked: stats.blockedThisSession || 0,
+<                 sessionStart: stats.sessionStartTime
+<             };
+<             log(`[ROI] Collected: ${collected.clicks} clicks, ${collected.blocked} blocked`);
+<             stats.clicksThisSession = 0;
+<             stats.blockedThisSession = 0;
+<             stats.sessionStartTime = Date.now();
+<             return collected;
+<         }
+---
+>     function getSessionSummary() {
+>         const stats = getStats();
+>         const clicks = stats.clicksThisSession || 0;
+90,92c113,114
+<         function getSessionSummary() {
+<             const stats = getStats();
+<             const clicks = stats.clicksThisSession || 0;
+---
+>         let estimatedTimeSaved = null;
+>         if (clicks > 0) {
+96,123c118
+< 
+<             return {
+<                 clicks,
+<                 fileEdits: stats.fileEditsThisSession || 0,
+<                 terminalCommands: stats.terminalCommandsThisSession || 0,
+<                 blocked: stats.blockedThisSession || 0,
+<                 estimatedTimeSaved: clicks > 0 ? `${minMins}–${maxMins} minutes` : null
+<             };
+<         }
+< 
+<         function consumeAwayActions(log) {
+<             const stats = getStatsMutable();
+<             const count = stats.actionsWhileAway || 0;
+<             log(`[Away] Consuming away actions: ${count}`);
+<             stats.actionsWhileAway = 0;
+<             return count;
+<         }
+< 
+<         function isUserAway() {
+<             return !getStats().isWindowFocused;
+<         }
+< 
+<         function initializeFocusState(log) {
+<             const state = window.__autoAcceptState;
+<             if (state && state.stats) {
+<                 state.stats.isWindowFocused = true;
+<                 log('[Focus] Initialized (awaiting extension sync)');
+<             }
+---
+>             estimatedTimeSaved = `${minMins}–${maxMins} minutes`;
+126,161c121,128
+<         function initialize(log) {
+<             if (!window.__autoAcceptState) {
+<                 window.__autoAcceptState = {
+<                     isRunning: false,
+<                     tabNames: [],
+<                     completionStatus: {},
+<                     sessionID: 0,
+<                     currentMode: null,
+<                     startTimes: {},
+<                     bannedCommands: [],
+<                     stats: createDefaultStats()
+<                 };
+<                 log('[Analytics] State initialized');
+<             } else if (!window.__autoAcceptState.stats) {
+<                 window.__autoAcceptState.stats = createDefaultStats();
+<                 log('[Analytics] Stats added to existing state');
+<             } else {
+<                 const s = window.__autoAcceptState.stats;
+<                 if (s.actionsWhileAway === undefined) s.actionsWhileAway = 0;
+<                 if (s.isWindowFocused === undefined) s.isWindowFocused = true;
+<                 if (s.fileEditsThisSession === undefined) s.fileEditsThisSession = 0;
+<                 if (s.terminalCommandsThisSession === undefined) s.terminalCommandsThisSession = 0;
+<             }
+< 
+<             initializeFocusState(log);
+< 
+<             if (!window.__autoAcceptState.stats.sessionStartTime) {
+<                 window.__autoAcceptState.stats.sessionStartTime = Date.now();
+<             }
+< 
+<             log('[Analytics] Initialized');
+<         }
+< 
+<         function setFocusState(isFocused, log) {
+<             const state = window.__autoAcceptState;
+<             if (!state || !state.stats) return;
+---
+>         return {
+>             clicks,
+>             fileEdits: stats.fileEditsThisSession || 0,
+>             terminalCommands: stats.terminalCommandsThisSession || 0,
+>             blocked: stats.blockedThisSession || 0,
+>             estimatedTimeSaved
+>         };
+>     }
+163,164c130,136
+<             const wasAway = !state.stats.isWindowFocused;
+<             state.stats.isWindowFocused = isFocused;
+---
+>     function consumeAwayActions() {
+>         const stats = getStats();
+>         const count = stats.actionsWhileAway || 0;
+>         log(`[Away] Consuming away actions: ${count}`);
+>         stats.actionsWhileAway = 0;
+>         return count;
+>     }
+166,168c138,142
+<             if (log) {
+<                 log(`[Focus] Extension sync: focused=${isFocused}, wasAway=${wasAway}`);
+<             }
+---
+>     function setFocusState(isFocused) {
+>         const state = ensureState();
+>         if (!state.stats) {
+>             log('[Focus] Cannot set focus state: stats not initialized');
+>             return;
+169a144,147
+>         const wasAway = !state.stats.isWindowFocused;
+>         state.stats.isWindowFocused = isFocused;
+>         log(`[Focus] Extension sync: focused=${isFocused}, wasAway=${wasAway}`);
+>     }
+171,186c149
+<         return {
+<             initialize,
+<             trackClick,
+<             trackBlocked,
+<             categorizeClick,
+<             ActionType,
+<             collectROI,
+<             getSessionSummary,
+<             consumeAwayActions,
+<             isUserAway,
+<             getStats,
+<             setFocusState
+<         };
+<     })();
+< 
+<     const log = (msg, isSuccess = false) => {
+---
+>     const log = (msg) => {
+190c153,158
+<     Analytics.initialize(log);
+---
+>     ensureState();
+>     const state = window.__autoAcceptState;
+>     if (!state.stats.sessionStartTime) {
+>         state.stats.sessionStartTime = Date.now();
+>     }
+>     log('[Analytics] Initialized');
+209c177
+<         docs.forEach((doc, idx) => {
+---
+>         for (const doc of docs) {
+214c182
+<         });
+---
+>         }
+277d244
+<         const state = window.__autoAcceptState;
+298c265
+<         const ide = state.currentMode || 'cursor';
+---
+>         const ide = window.__autoAcceptState.currentMode || 'cursor';
+329d295
+<         const state = window.__autoAcceptState;
+337,338c303
+<         log(`[Overlay] updateOverlay call: tabNames count=${state.tabNames?.length || 0}`);
+<         const newNames = state.tabNames || [];
+---
+>         const newNames = window.__autoAcceptState.tabNames || [];
+363c328
+<             const status = state.completionStatus[name];
+---
+>             const status = window.__autoAcceptState.completionStatus[name];
+440d404
+<                         log(`[BannedCmd] Found <${sibling.tagName}> sibling at depth ${depth}: "${text.substring(0, 100)}..."`);
+451d414
+<                                 log(`[BannedCmd] Found <${selector}> in sibling at depth ${depth}: "${text.substring(0, 100)}..."`);
+493,497c456
+<         const result = commandText.trim().toLowerCase();
+<         if (result.length > 0) {
+<             log(`[BannedCmd] Extracted command text (${result.length} chars): "${result.substring(0, 150)}..."`);
+<         }
+<         return result;
+---
+>         return commandText.trim().toLowerCase();
+501,502c460
+<         const state = window.__autoAcceptState;
+<         const bannedList = state.bannedCommands || [];
+---
+>         const bannedList = window.__autoAcceptState.bannedCommands || [];
+522c480
+<                         Analytics.trackBlocked(log);
+---
+>                         trackBlocked();
+529c487
+<                         Analytics.trackBlocked(log);
+---
+>                         trackBlocked();
+537c495
+<                     Analytics.trackBlocked(log);
+---
+>                     trackBlocked();
+553a512
+> 
+555a515
+> 
+557d516
+<             log(`[Button] Rejected (matches reject pattern): "${text.substring(0, 30)}"`);
+559a519
+> 
+561,563d520
+<             if (text.length < 20) {
+<                 log(`[Button] Skipped (no pattern match): "${text}"`);
+<             }
+580,583c537,539
+<         if (!isVisible) {
+<             log(`[Button] Rejected (not visible/clickable): "${text.substring(0, 20)}" display=${style.display} width=${rect.width} pointerEvents=${style.pointerEvents} disabled=${el.disabled}`);
+<         } else {
+<             log(`[Button] ACCEPTED: "${text}" (raw: "${rawText.substring(0, 30)}")`);
+---
+> 
+>         if (isVisible) {
+>             log(`[Button] ACCEPTED: "${text}"`);
+584a541
+> 
+595c552
+<     function waitForDisappear(el, timeout = 500) {
+---
+>     function waitForDisappear(el, timeout = BUTTON_DISAPPEAR_TIMEOUT) {
+612,613c569,570
+<         const found = [];
+<         selectors.forEach(s => {
+---
+>         const foundSet = new Set();
+>         for (const s of selectors) {
+615,617c572,577
+<             log(`[Click] Selector "${s}" found ${elements.length} elements`);
+<             elements.forEach(el => found.push(el));
+<         });
+---
+>             for (const el of elements) {
+>                 foundSet.add(el);
+>             }
+>         }
+> 
+>         const uniqueFound = Array.from(foundSet);
+620,621d579
+<         const uniqueFound = [...new Set(found)];
+<         log(`[Click] Total unique elements to check: ${uniqueFound.length}`);
+639c597
+<                     Analytics.trackClick(buttonText, log);
+---
+>                     trackClick(buttonText);
+643c601
+<                     log(`[Stats] Click not verified (button still visible after 500ms)`);
+---
+>                     log(`[Stats] Click not verified (button still visible)`);
+660d617
+<             log(`[Loop] Cycle ${cycle}: Starting...`);
+663c620,622
+<             log(`[Loop] Cycle ${cycle}: Clicked ${clicked} buttons`);
+---
+>             if (clicked > 0) {
+>                 log(`[Loop] Cycle ${cycle}: Clicked ${clicked} buttons`);
+>             }
+665c624
+<             await new Promise(r => setTimeout(r, 800));
+---
+>             await new Promise(r => setTimeout(r, CLICK_SETTLE_DELAY));
+677,684c636
+<                 if (tabs.length > 0) {
+<                     log(`[Loop] Cycle ${cycle}: Found ${tabs.length} tabs using selector: ${selector}`);
+<                     break;
+<                 }
+<             }
+< 
+<             if (tabs.length === 0) {
+<                 log(`[Loop] Cycle ${cycle}: No tabs found in any known locations.`);
+---
+>                 if (tabs.length > 0) break;
+691,692d642
+<                 const tabLabel = targetTab.getAttribute('aria-label') || targetTab.textContent?.trim() || 'unnamed tab';
+<                 log(`[Loop] Cycle ${cycle}: Clicking tab "${tabLabel}"`);
+697,699d646
+<             const state = window.__autoAcceptState;
+<             log(`[Loop] Cycle ${cycle}: State = { tabs: ${state.tabNames?.length || 0}, isRunning: ${state.isRunning}, sid: ${state.sessionID} }`);
+< 
+701,703c648
+<             log(`[Loop] Cycle ${cycle}: Overlay updated, waiting 3s...`);
+< 
+<             await new Promise(r => setTimeout(r, 3000));
+---
+>             await new Promise(r => setTimeout(r, LOOP_CYCLE_DELAY));
+714d658
+<             log(`[Loop] Cycle ${cycle}: Starting...`);
+723,724d666
+<             log(`[Loop] Cycle ${cycle}: Found ${feedbackBadges.length} Good/Bad badges`);
+< 
+728,730c670,672
+<                 log(`[Loop] Cycle ${cycle}: Clicked ${clicked} accept buttons`);
+<             } else {
+<                 log(`[Loop] Cycle ${cycle}: Skipping clicks - conversation is DONE (has badge)`);
+---
+>                 if (clicked > 0) {
+>                     log(`[Loop] Cycle ${cycle}: Clicked ${clicked} accept buttons`);
+>                 }
+733c675
+<             await new Promise(r => setTimeout(r, 800));
+---
+>             await new Promise(r => setTimeout(r, CLICK_SETTLE_DELAY));
+737d678
+<                 log(`[Loop] Cycle ${cycle}: Clicking New Tab button`);
+743d683
+<             log(`[Loop] Cycle ${cycle}: Found ${tabsAfter.length} tabs`);
+750d689
+<                 log(`[Loop] Cycle ${cycle}: Clicking tab "${clickedTabName}"`);
+762,765c701
+<                 })
+<                 .map(s => s.textContent.trim());
+< 
+<             log(`[Loop] Cycle ${cycle}: Found ${feedbackTexts.length} Good/Bad badges`);
+---
+>                 });
+771,773d706
+<             const state = window.__autoAcceptState;
+<             log(`[Loop] Cycle ${cycle}: State = { tabs: ${state.tabNames?.length || 0}, completions: ${JSON.stringify(state.completionStatus)} }`);
+< 
+775,777c708
+<             log(`[Loop] Cycle ${cycle}: Overlay updated, waiting 3s...`);
+< 
+<             await new Promise(r => setTimeout(r, 3000));
+---
+>             await new Promise(r => setTimeout(r, LOOP_CYCLE_DELAY));
+783,788c714,715
+<         const state = window.__autoAcceptState;
+<         state.bannedCommands = Array.isArray(bannedList) ? bannedList : [];
+<         log(`[Config] Updated banned commands list: ${state.bannedCommands.length} patterns`);
+<         if (state.bannedCommands.length > 0) {
+<             log(`[Config] Banned patterns: ${state.bannedCommands.join(', ')}`);
+<         }
+---
+>         window.__autoAcceptState.bannedCommands = Array.isArray(bannedList) ? bannedList : [];
+>         log(`[Config] Updated banned commands list: ${window.__autoAcceptState.bannedCommands.length} patterns`);
+792c719
+<         const stats = Analytics.getStats();
+---
+>         const stats = getStats();
+804c731
+<         return Analytics.collectROI(log);
+---
+>         return collectROI();
+808c735
+<         return Analytics.getSessionSummary();
+---
+>         return getSessionSummary();
+812c739
+<         return Analytics.consumeAwayActions(log);
+---
+>         return consumeAwayActions();
+816c743,747
+<         Analytics.setFocusState(isFocused, log);
+---
+>         setFocusState(isFocused);
+>     };
+> 
+>     window.__autoAcceptHideOverlay = function () {
+>         hideOverlay();
+830c761
+<             const state = window.__autoAcceptState;
+---
+>             const state = ensureState();
+852c783
+<             log(`Agent Loaded (IDE: ${ide}, BG: ${isBG})`, true);
+---
+>             log(`Agent Loaded (IDE: ${ide}, BG: ${isBG})`);
+857d787
+<                 log(`[BG] Overlay created, starting ${ide} loop...`);

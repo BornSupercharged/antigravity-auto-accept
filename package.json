@@ -1,0 +1,56 @@
+{
+    "name": "antigravity-auto-accept",
+    "displayName": "Antigravity Auto Accept",
+    "description": "Automate Antigravity 'Accept' clicks",
+    "version": "1.1.0",
+    "publisher": "BornSupercharged",
+    "icon": "media/icon.png",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/BornSupercharged/antigravity-auto-accept"
+    },
+    "categories": [
+        "Machine Learning",
+        "Other"
+    ],
+    "keywords": [
+        "antigravity",
+        "ai",
+        "auto-accept"
+    ],
+    "scripts": {
+        "test": "node test/integration-test.js",
+        "compile": "esbuild extension.js --bundle --outfile=dist/extension.js --external:vscode --platform=node --format=cjs",
+        "vscode:prepublish": "npm run compile",
+        "package": "npx vsce package"
+    },
+    "engines": {
+        "vscode": "^1.75.0"
+    },
+    "activationEvents": [
+        "onStartupFinished"
+    ],
+    "main": "dist/extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "auto-accept.toggle",
+                "title": "Auto Accept: Toggle ON/OFF"
+            },
+            {
+                "command": "auto-accept.toggleBackground",
+                "title": "Auto Accept: Toggle Background Mode"
+            },
+            {
+                "command": "auto-accept.openSettings",
+                "title": "Auto Accept: Settings"
+            }
+        ]
+    },
+    "dependencies": {
+        "ws": "^8.13.0"
+    },
+    "devDependencies": {
+        "esbuild": "^0.27.1"
+    }
+}
