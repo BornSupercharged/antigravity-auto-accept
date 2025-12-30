@@ -123,6 +123,28 @@ Check your status bar for `Auto Accept: ON` and watch the magic happen.
 
 ---
 
+## 🔧 Building from Source
+
+Don't trust precompiled binaries? We respect that. Here's how to build it yourself:
+
+```bash
+# Clone the repo
+git clone https://github.com/BornSupercharged/antigravity-auto-accept.git
+cd antigravity-auto-accept
+
+# Install dependencies
+npm install
+
+# Build the VSIX
+npx vsce package --allow-missing-repository
+```
+
+This creates `antigravity-auto-accept-x.x.x.vsix` which you can install via:
+- **VS Code/Cursor**: `code --install-extension antigravity-auto-accept-x.x.x.vsix`
+- **Or**: Right-click the `.vsix` file → "Install Extension VSIX"
+
+---
+
 ## 🎬 How It Works (The Secret Sauce)
 
 ```
