@@ -271,7 +271,7 @@ async function handleToggle(context) {
 async function handleRelaunch() {
     if (!relauncher) {
         vscode.window.showErrorMessage('Relauncher not initialized.');
-        return;
+        return { success: false, message: 'Relauncher not initialized' };
     }
 
     log('Initiating Relaunch...');
@@ -279,6 +279,7 @@ async function handleRelaunch() {
     if (!result.success) {
         vscode.window.showErrorMessage(`Relaunch failed: ${result.message}`);
     }
+    return result;
 }
 
 async function handleFrequencyUpdate(context, freq) {

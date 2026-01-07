@@ -70,6 +70,21 @@ class SettingsPanel {
                     case 'dismissPrompt':
                         await this.handleDismiss();
                         break;
+                    case 'forceRelaunch':
+                        vscode.window.showInformationMessage('Starting forceful relaunch sequence...');
+                        try {
+                            const result = await vscode.commands.executeCommand('auto-accept.relaunch');
+                            this.panel.webview.postMessage({
+                                command: 'relaunchComplete',
+                                result
+                            });
+                        } catch (e) {
+                            this.panel.webview.postMessage({
+                                command: 'relaunchComplete',
+                                result: { success: false, message: e.message }
+                            });
+                        }
+                        break;
                 }
             },
             null,
@@ -330,6 +345,13 @@ class SettingsPanel {
                 filter: grayscale(1);
             }
 
+            @keyframes shake {
+                0%, 100% { transform: translateX(0); }
+                10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
+                20%, 40%, 60%, 80% { transform: translateX(4px); }
+            }
+            .shake { animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both; }
+
             .prompt-card {
                 background: var(--card-bg);
                 border: 1px solid var(--border);
@@ -407,7 +429,19 @@ class SettingsPanel {
                             Reset
                         </button>
                     </div>
-                    <div id="bannedStatus" style="font-size: 12px; margin-top: 12px; text-align: center; height: 18px;"></div>
+                <div id="bannedStatus" style="font-size: 12px; margin-top: 12px; text-align: center; height: 18px;"></div>
+                </div>
+
+                <!-- Troubleshooting Section -->
+                <div class="section" style="border-color: rgba(239, 68, 68, 0.3);">
+                    <div class="section-label" style="color: #ef4444;">Troubleshooting</div>
+                    <div style="font-size: 13px; opacity: 0.8; margin-bottom: 16px; line-height: 1.5;">
+                        If Auto Accept isn't working or the setup didn't complete, click below to force a re-configuration and restart.
+                    </div>
+                    <button id="forceRelaunchBtn" class="btn-outline" style="width: 100%; border-color: rgba(239, 68, 68, 0.5); color: #ef4444;">
+                        Force Relaunch & Enable
+                    </button>
+                    <div id="relaunchStatus" style="font-size: 12px; margin-top: 12px; text-align: center; height: 18px;"></div>
                 </div>
             </div>
 
@@ -462,6 +496,21 @@ class SettingsPanel {
                     });
                 }
 
+                const forceRelaunchBtn = document.getElementById('forceRelaunchBtn');
+                const relaunchStatus = document.getElementById('relaunchStatus');
+
+                if (forceRelaunchBtn) {
+                    forceRelaunchBtn.addEventListener('click', () => {
+                        forceRelaunchBtn.disabled = true;
+                        forceRelaunchBtn.innerText = 'Analyzing Environment...';
+                        relaunchStatus.innerText = 'Checking shortcuts and configuration...';
+                        
+                        setTimeout(() => {
+                            vscode.postMessage({ command: 'forceRelaunch' });
+                        }, 500);
+                    });
+                }
+
                 // --- Fancy Count-up Animation ---
                 function animateCountUp(element, target, duration = 1200, suffix = '') {
                     const currentVal = parseInt(element.innerText.replace(/[^0-9]/g, '')) || 0;
@@ -500,6 +549,40 @@ class SettingsPanel {
                     if (msg.command === 'updateBannedCommands') {
                         if (bannedInput && msg.bannedCommands) {
                             bannedInput.value = msg.bannedCommands.join('\\n');
+                        }
+                    }
+                    if (msg.command === 'relaunchComplete') {
+                        const result = msg.result;
+                        const btn = document.getElementById('forceRelaunchBtn');
+                        const status = document.getElementById('relaunchStatus');
+                        
+                        if (btn && status) {
+                            btn.disabled = false;
+                            btn.innerText = 'Force Relaunch & Enable';
+                            
+                            if (result.success) {
+                                if (result.action === 'none') {
+                                    status.innerText = 'System is already optimized! ✅';
+                                    status.style.color = 'var(--green)';
+                                } else {
+                                    // If success but not 'none', the window is likely closing, 
+                                    // but if not, we show this:
+                                    status.innerText = 'Relaunch initiated...';
+                                    status.style.color = 'var(--accent)';
+                                }
+                            } else {
+                                status.innerText = 'Failed: ' + (result.message || 'Unknown error');
+                                status.style.color = '#ef4444';
+                                btn.classList.add('shake');
+                                setTimeout(() => btn.classList.remove('shake'), 500);
+                            }
+                            
+                            // Clear status after 5s
+                            setTimeout(() => {
+                                if (status.innerText.includes('Failed')) {
+                                    status.innerText = '';
+                                }
+                            }, 5000);
                         }
                     }
                 });

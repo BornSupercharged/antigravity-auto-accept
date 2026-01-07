@@ -115,6 +115,37 @@ Check your status bar for `Auto Accept: ON` and watch the magic happen.
 
 ---
 
+## ⚡ IMPORTANT: Antigravity Setup
+
+For this extension to work with **Antigravity**, you MUST launch the application with a specific debugging port enabled.
+
+### 🚀 Launch Instruction
+
+Run this command in PowerShell to launch Antigravity:
+
+```powershell
+& "C:\Users\<YOUR_USERNAME>\AppData\Local\Programs\Antigravity\Antigravity.exe" --remote-debugging-port=9222
+```
+
+We recommend creating a shortcut or script with this command for convenience.
+
+### ❓ Why is this required?
+
+Antigravity's "Accept" buttons are part of its native UI, not web elements. This means standard automation cannot click them.
+
+The extension solves this by sending the `Alt+G` keyboard shortcut directly to the application via the Chrome DevTools Protocol (CDP).
+
+To allow this connection:
+1.  **Port 9222**: Antigravity must be listening on this port.
+2.  **Safety Check**: The extension verifies it is connected to "Antigravity" before sending keys, to prevent accidental inputs in other VS Code windows.
+
+### 🔧 Troubleshooting
+
+-   **Accept not clicking?** Ensure you launched with the command above.
+-   **Spamming other windows?** The v1.4.10+ update includes a safety check to prevent this. Ensure you are running the latest version.
+
+---
+
 ## 🛠️ Requirements
 
 - Antigravity or Cursor IDE

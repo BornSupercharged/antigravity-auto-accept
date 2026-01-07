@@ -27,6 +27,12 @@ class CDPHandler {
     log(...args) {
         const msg = `${LOG_PREFIX} ${args.join(' ')}`;
         if (this.logger) this.logger(msg);
+        // Also write to log file for debugging
+        if (this.logFilePath) {
+            try {
+                fs.appendFileSync(this.logFilePath, `[${new Date().toISOString()}] ${msg}\n`);
+            } catch (e) { /* ignore file write errors */ }
+        }
     }
 
     async isCDPAvailable() {
@@ -36,9 +42,11 @@ class CDPHandler {
 
     async scanForInstances() {
         const instances = [];
-        const portsToScan = [];
-        for (let p = this.startPort; p <= this.endPort; p++) portsToScan.push(p);
-        if (!portsToScan.includes(9222)) portsToScan.push(9222);
+        // Prioritize 9222 (standard) and then scan 9000-9030
+        const portsToScan = [9222];
+        for (let p = this.startPort; p <= this.endPort; p++) {
+            if (p !== 9222) portsToScan.push(p);
+        }
 
         for (const port of portsToScan) {
             try {
@@ -51,27 +59,67 @@ class CDPHandler {
 
     getPages(port) {
         return new Promise((resolve, reject) => {
-            const req = http.get({ hostname: '127.0.0.1', port, path: '/json/list', timeout: 1000 }, (res) => {
+            const req = http.get({ hostname: '127.0.0.1', port, path: '/json/list', timeout: 2000 }, (res) => {
                 let data = '';
                 res.on('data', chunk => data += chunk);
                 res.on('end', () => {
-                    try { resolve(JSON.parse(data).filter(p => p.webSocketDebuggerUrl)); }
-                    catch (e) { reject(e); }
+                    try {
+                        const allPages = JSON.parse(data);
+                        this.log(`Raw CDP targets: ${allPages.length} found`);
+
+                        // Filter to only include targets with webSocketDebuggerUrl
+                        const validPages = allPages.filter(p => p.webSocketDebuggerUrl);
+
+                        // Log each target for debugging
+                        validPages.forEach(p => {
+                            this.log(`  Target: type=${p.type}, id=${p.id}, title="${(p.title || '').substring(0, 50)}"`);
+                        });
+
+                        // Sort to prioritize: 1) main page, 2) iframes, 3) workers
+                        // Main page is where the native Accept buttons live
+                        validPages.sort((a, b) => {
+                            const priority = { 'page': 0, 'iframe': 1, 'other': 2, 'worker': 3 };
+                            const aPriority = priority[a.type] ?? 2;
+                            const bPriority = priority[b.type] ?? 2;
+                            return aPriority - bPriority;
+                        });
+
+                        this.log(`Sorted ${validPages.length} pages for injection (main page first)`);
+                        resolve(validPages);
+                    }
+                    catch (e) {
+                        this.log(`Error parsing CDP response: ${e.message}`);
+                        reject(e);
+                    }
                 });
             });
-            req.on('error', reject);
-            req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+            req.on('error', (e) => {
+                this.log(`CDP request error on port ${port}: ${e.message}`);
+                reject(e);
+            });
+            req.on('timeout', () => {
+                this.log(`CDP request timeout on port ${port}`);
+                req.destroy();
+                reject(new Error('timeout'));
+            });
         });
     }
 
     async start(config) {
         this.isEnabled = true;
+        this.config = config; // Store config for later use
         const instances = await this.scanForInstances();
 
         this.log(`Found ${instances.length} CDP instance(s)`);
         for (const instance of instances) {
             this.log(`Instance on port ${instance.port}: ${instance.pages.length} page(s)`);
             for (const page of instance.pages) {
+                // Skip workers - they don't have a DOM
+                if (page.type === 'worker') {
+                    this.log(`  Skipping worker: ${page.id} (no DOM)`);
+                    continue;
+                }
+
                 this.log(`  Page: ${page.id} - ${page.title || 'untitled'} - ${page.url || 'no url'}`);
                 if (!this.connections.has(page.id)) {
                     await this.connectToPage(page);
@@ -81,10 +129,183 @@ class CDPHandler {
                 }
             }
         }
+
+        // Query and log diagnostic info from the main page
+        await this.logDiagnostics();
+
+        // Start keyboard shortcut polling loop as a fallback
+        this.startKeyboardShortcutLoop(config.pollInterval || 2000);
+    }
+
+    startKeyboardShortcutLoop(interval) {
+        // Clear any existing loop
+        if (this.keyboardLoopInterval) {
+            clearInterval(this.keyboardLoopInterval);
+        }
+
+        this.log(`Starting keyboard shortcut loop (every ${interval}ms)...`);
+
+        // Poll every interval and try to send the Accept shortcut
+        this.keyboardLoopInterval = setInterval(async () => {
+            if (!this.isEnabled) {
+                clearInterval(this.keyboardLoopInterval);
+                return;
+            }
+
+            // Safety Check: Verify we are targeting Antigravity (or at least checking title)
+            const isSafe = await this.verifyTargetIsAntigravity();
+            if (!isSafe) {
+                return;
+            }
+
+            // Try sending the Alt+G shortcut
+            try {
+                await this.sendAcceptShortcut();
+            } catch (e) {
+                // Ignore errors silently
+            }
+        }, interval);
+    }
+
+    // Check if the connected page is likely Antigravity
+    async verifyTargetIsAntigravity() {
+        const mainPageId = Array.from(this.connections.keys())[0];
+        if (!mainPageId) return false;
+
+        try {
+            const result = await this.sendCommand(mainPageId, 'Runtime.evaluate', {
+                expression: 'document.title'
+            });
+
+            const title = result.result?.value || '';
+
+            // If legitimate Antigravity, it usually has "Antigravity" in the title
+            // If it's pure VS Code, it says "Visual Studio Code"
+            // We want to avoid sending keys to pure VS Code IF we can distinguish them.
+            if (title.includes('Visual Studio Code') && !title.includes('Antigravity') && !title.includes('BornSupercharged')) {
+                if (!this._loggedMismatch) {
+                    this.log(`[WARNING] Skipping input: Target appears to be VS Code ("${title}"), not Antigravity.`);
+                    this._loggedMismatch = true;
+                }
+                return false;
+            }
+
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    async logDiagnostics() {
+        // Only log diagnostics every 10 seconds to avoid spam
+        const now = Date.now();
+        if (this.lastDiagnosticTime && (now - this.lastDiagnosticTime) < 10000) {
+            return;
+        }
+        this.lastDiagnosticTime = now;
+
+        for (const [pageId] of this.connections) {
+            try {
+                const result = await this.sendCommand(pageId, 'Runtime.evaluate', {
+                    expression: `(function(){
+                        if(typeof window === 'undefined') return JSON.stringify({error: 'no window'});
+                        
+                        // Recursively get all elements including those in Shadow DOMs
+                        function getAllElements(root, depth = 0) {
+                            const elements = [];
+                            if (depth > 10) return elements; // Prevent infinite recursion
+                            
+                            const children = root.querySelectorAll ? root.querySelectorAll('*') : [];
+                            children.forEach(el => {
+                                elements.push(el);
+                                // Also search inside shadow roots
+                                if (el.shadowRoot) {
+                                    elements.push(...getAllElements(el.shadowRoot, depth + 1));
+                                }
+                            });
+                            return elements;
+                        }
+                        
+                        const allElements = getAllElements(document);
+                        const buttons = allElements.filter(el => el.tagName === 'BUTTON');
+                        const clickables = allElements.filter(el => 
+                            el.tagName === 'BUTTON' || 
+                            el.tagName === 'A' ||
+                            el.getAttribute('role') === 'button' ||
+                            el.onclick ||
+                            (el.className && (el.className.includes('button') || el.className.includes('btn')))
+                        );
+                        
+                        // Find any element with Accept-like text
+                        const acceptPatterns = ['accept', 'run command', 'allow', 'approve', 'confirm', 'reject'];
+                        const acceptElements = [];
+                        
+                        allElements.forEach(el => {
+                            const text = (el.textContent || '').toLowerCase().trim();
+                            if (text.length > 0 && text.length < 100 && acceptPatterns.some(p => text.includes(p))) {
+                                const rect = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+                                acceptElements.push({
+                                    tag: el.tagName,
+                                    text: text.substring(0, 50),
+                                    classes: el.className ? String(el.className).substring(0, 80) : '',
+                                    id: el.id || '',
+                                    visible: rect && rect.width > 0 && rect.height > 0,
+                                    inShadow: el.getRootNode() !== document
+                                });
+                            }
+                        });
+                        
+                        // Count shadow roots
+                        const shadowRoots = allElements.filter(el => el.shadowRoot).length;
+                        
+                        return JSON.stringify({
+                            totalElements: allElements.length,
+                            buttons: buttons.length,
+                            clickables: clickables.length,
+                            shadowRoots: shadowRoots,
+                            acceptElements: acceptElements.slice(0, 15),
+                            url: window.location.href.substring(0, 80),
+                            state: window.__autoAcceptState ? {
+                                isRunning: window.__autoAcceptState.isRunning,
+                                mode: window.__autoAcceptState.currentMode
+                            } : null
+                        });
+                    })()`,
+                    returnByValue: true
+                });
+
+                if (result.result?.value) {
+                    const diag = JSON.parse(result.result.value);
+                    this.log(`[DIAG] Page ${pageId.substring(0, 8)}... URL: ${diag.url || 'unknown'}`);
+                    this.log(`[DIAG]   Elements: ${diag.totalElements}, Buttons: ${diag.buttons}, Clickables: ${diag.clickables}, ShadowRoots: ${diag.shadowRoots || 0}`);
+                    if (diag.state) {
+                        this.log(`[DIAG]   Script state: isRunning=${diag.state.isRunning}, mode=${diag.state.mode}`);
+                    }
+                    if (diag.acceptElements && diag.acceptElements.length > 0) {
+                        this.log(`[DIAG]   Found ${diag.acceptElements.length} accept-like elements:`);
+                        diag.acceptElements.forEach((el, i) => {
+                            this.log(`[DIAG]     ${i + 1}. <${el.tag}> "${el.text}" shadow=${el.inShadow} visible=${el.visible}`);
+                        });
+                    }
+                    if (diag.error) {
+                        this.log(`[DIAG]   Error: ${diag.error}`);
+                    }
+                }
+            } catch (e) {
+                // Ignore errors from pages that don't have the script
+            }
+        }
     }
 
     async stop() {
         this.isEnabled = false;
+
+        // Clear keyboard shortcut loop
+        if (this.keyboardLoopInterval) {
+            clearInterval(this.keyboardLoopInterval);
+            this.keyboardLoopInterval = null;
+        }
+
         const stopPromises = [];
         for (const [pageId] of this.connections) {
             stopPromises.push(
@@ -95,6 +316,63 @@ class CDPHandler {
         }
         this.disconnectAll();
         Promise.allSettled(stopPromises);
+    }
+
+    // Send Alt+G keyboard shortcut to trigger Antigravity's native Accept
+    async sendAcceptShortcut() {
+        this.log('Sending Alt+G Accept shortcut...');
+
+        // Get the main page connection (first one, which should be the main window)
+        const mainPageId = Array.from(this.connections.keys())[0];
+        if (!mainPageId) {
+            this.log('No page connection for keyboard shortcut');
+            return false;
+        }
+
+        try {
+            // Send Alt+G using CDP Input.dispatchKeyEvent
+            // First, press Alt (modifiers = 1 for Alt)
+            await this.sendCommand(mainPageId, 'Input.dispatchKeyEvent', {
+                type: 'keyDown',
+                modifiers: 1, // Alt
+                key: 'Alt',
+                code: 'AltLeft',
+                windowsVirtualKeyCode: 18
+            });
+
+            // Then press G while Alt is held
+            await this.sendCommand(mainPageId, 'Input.dispatchKeyEvent', {
+                type: 'keyDown',
+                modifiers: 1, // Alt
+                key: 'g',
+                code: 'KeyG',
+                windowsVirtualKeyCode: 71
+            });
+
+            // Release G
+            await this.sendCommand(mainPageId, 'Input.dispatchKeyEvent', {
+                type: 'keyUp',
+                modifiers: 1,
+                key: 'g',
+                code: 'KeyG',
+                windowsVirtualKeyCode: 71
+            });
+
+            // Release Alt
+            await this.sendCommand(mainPageId, 'Input.dispatchKeyEvent', {
+                type: 'keyUp',
+                modifiers: 0,
+                key: 'Alt',
+                code: 'AltLeft',
+                windowsVirtualKeyCode: 18
+            });
+
+            this.log('Alt+G shortcut sent successfully');
+            return true;
+        } catch (e) {
+            this.log(`Error sending keyboard shortcut: ${e.message}`);
+            return false;
+        }
     }
 
     async connectToPage(page) {
@@ -127,11 +405,17 @@ class CDPHandler {
 
     async injectAndStart(pageId, config) {
         const conn = this.connections.get(pageId);
-        if (!conn) return;
+        if (!conn) {
+            this.log(`Cannot inject into ${pageId}: no connection found`);
+            return;
+        }
+        this.log(`Attempting to inject/start on ${pageId}...`);
 
         try {
             if (!conn.injected) {
+                this.log(`Getting script for injection...`);
                 const script = this.getComposedScript();
+                this.log(`Script loaded (${script.length} chars), sending to page...`);
                 const result = await this.sendCommand(pageId, 'Runtime.evaluate', {
                     expression: script,
                     userGesture: true,
@@ -166,7 +450,16 @@ class CDPHandler {
 
     getComposedScript() {
         const scriptPath = path.join(__dirname, '..', 'main_scripts', 'full_cdp_script.js');
-        return fs.readFileSync(scriptPath, 'utf8');
+        this.log(`Loading script from: ${scriptPath}`);
+
+        if (!fs.existsSync(scriptPath)) {
+            this.log(`ERROR: Script file not found at ${scriptPath}`);
+            throw new Error(`Script file not found: ${scriptPath}`);
+        }
+
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        this.log(`Script file read successfully: ${content.length} bytes`);
+        return content;
     }
 
     sendCommand(pageId, method, params = {}) {

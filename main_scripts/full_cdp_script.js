@@ -853,11 +853,27 @@
             // Always run the static poll loop - this reliably clicks buttons
             hideOverlay();
             log(`Starting static poll loop...`);
+            let pollCount = 0;
             (async function staticLoop() {
                 while (state.isRunning && state.sessionID === sid) {
-                    performClick(['button', '[class*="button"]', '[class*="anysphere"]']);
+                    pollCount++;
+                    // Log every 10th poll to avoid spam
+                    const shouldLog = (pollCount % 10 === 1);
+
+                    if (shouldLog) {
+                        const allButtons = queryAll('button');
+                        log(`[Poll #${pollCount}] Found ${allButtons.length} buttons on page`);
+                    }
+
+                    const clicked = await performClick(['button', '[class*="button"]', '[class*="anysphere"]', '.bg-ide-button-background']);
+
+                    if (clicked > 0) {
+                        log(`[Poll #${pollCount}] Clicked ${clicked} buttons!`);
+                    }
+
                     await new Promise(r => setTimeout(r, config.pollInterval || 1000));
                 }
+                log(`Static poll loop stopped at poll #${pollCount}`);
             })();
 
             // If background mode, also run the tab-switching loop concurrently
